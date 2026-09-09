@@ -1,5 +1,8 @@
 from django.core.management.base import BaseCommand
-from reception.models import Business, FAQ, Service
+from accounts.models import User
+from reception.models import (
+    Business, BusinessLocation, BusinessMembership, FAQ, NotificationEndpoint, Service,
+)
 
 
 class Command(BaseCommand):
@@ -12,17 +15,30 @@ class Command(BaseCommand):
                 "name": "Bright Home Repairs",
                 "description": "Local home repair and maintenance service.",
                 "phone": "+91 90000 00000",
-                "address": "Madhapur, Hyderabad",
-                "business_hours": "Monday-Saturday, 9 AM-6 PM",
                 "service_area": "Hyderabad",
-                "owner_notification_target": "owner@example.com",
                 "escalation_instructions": "Escalate emergencies, complaints, price negotiations, and owner requests.",
+                "status": Business.Status.ACTIVE,
             },
+        )
+        owner, _ = User.objects.get_or_create(email="owner@example.com", defaults={"first_name": "Demo", "last_name": "Owner"})
+        owner.set_unusable_password()
+        owner.save(update_fields=["password"])
+        BusinessMembership.objects.update_or_create(
+            business=business, user=owner,
+            defaults={"role": BusinessMembership.Role.OWNER, "status": BusinessMembership.Status.ACTIVE},
+        )
+        location, _ = BusinessLocation.objects.update_or_create(
+            business=business, name="Madhapur",
+            defaults={"address_line_1": "Madhapur", "city": "Hyderabad", "state": "Telangana", "is_primary": True},
+        )
+        NotificationEndpoint.objects.update_or_create(
+            business=business, channel=NotificationEndpoint.Channel.EMAIL, destination="owner@example.com",
+            defaults={"label": "Owner email", "enabled": True},
         )
         Service.objects.update_or_create(
             business=business,
             name="AC repair",
-            defaults={"description": "Inspection and repair for home air conditioners.", "price_from": 499, "price_note": "Final price depends on inspection."},
+            defaults={"location": location, "description": "Inspection and repair for home air conditioners.", "price_from": 499, "price_note": "Final price depends on inspection."},
         )
         FAQ.objects.update_or_create(
             business=business,

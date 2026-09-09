@@ -1,7 +1,7 @@
 from django.core import mail
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
-from .models import Business, FAQ
+from .models import Business, FAQ, NotificationEndpoint
 
 
 @override_settings(
@@ -12,7 +12,11 @@ from .models import Business, FAQ
 class ReceptionFlowTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(
-            slug="test-repairs", name="Test Repairs", description="Repairs", owner_notification_target="owner@example.com"
+            slug="test-repairs", name="Test Repairs", description="Repairs", status=Business.Status.ACTIVE
+        )
+        NotificationEndpoint.objects.create(
+            business=self.business, channel=NotificationEndpoint.Channel.EMAIL,
+            destination="owner@example.com", label="Owner",
         )
         FAQ.objects.create(business=self.business, question="Hours", answer="We are open 9 to 6.", keywords="hours,open")
         self.client = APIClient()

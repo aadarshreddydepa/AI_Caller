@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Business, Call, Lead
+from .models import Business, BusinessMembership, CallSession, ConversationTurn, Lead
 
 
 class StartCallSerializer(serializers.Serializer):
@@ -24,4 +24,48 @@ class LeadSerializer(serializers.Serializer):
 class BusinessSerializer(serializers.ModelSerializer):
     class Meta:
         model = Business
-        fields = ["slug", "name", "description", "phone", "address", "business_hours", "service_area"]
+        fields = ["id", "slug", "name", "description", "phone", "service_area", "timezone", "default_language"]
+
+
+class MembershipSerializer(serializers.ModelSerializer):
+    business = BusinessSerializer(read_only=True)
+
+    class Meta:
+        model = BusinessMembership
+        fields = ["id", "role", "status", "business"]
+
+
+class ConversationTurnSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConversationTurn
+        fields = ["id", "sequence_number", "speaker", "text", "stt_confidence", "interrupted", "created_at"]
+
+
+class CallSessionSerializer(serializers.ModelSerializer):
+    lead_id = serializers.UUIDField(source="lead.id", read_only=True, allow_null=True)
+
+    class Meta:
+        model = CallSession
+        fields = [
+            "id", "direction", "caller_name", "caller_phone", "status", "started_at",
+            "ended_at", "duration_seconds", "after_hours", "escalated", "lead_id",
+        ]
+
+
+class CallDetailSerializer(CallSessionSerializer):
+    turns = ConversationTurnSerializer(many=True, read_only=True)
+
+    class Meta(CallSessionSerializer.Meta):
+        fields = CallSessionSerializer.Meta.fields + ["end_reason", "detected_language", "recording_status", "turns"]
+
+
+class LeadListSerializer(serializers.ModelSerializer):
+    call_started_at = serializers.DateTimeField(source="call.started_at", read_only=True)
+
+    class Meta:
+        model = Lead
+        fields = [
+            "id", "call_id", "caller_name", "caller_phone", "requirement", "location",
+            "preferred_callback_time", "urgency", "status", "owner_callback_requested",
+            "summary", "call_started_at", "created_at",
+        ]
