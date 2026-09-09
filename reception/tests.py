@@ -1,7 +1,8 @@
 from django.core import mail
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
-from .models import Business, FAQ, NotificationEndpoint
+from accounts.models import User
+from .models import Business, BusinessMembership, CallSession, FAQ, NotificationEndpoint
 
 
 @override_settings(
@@ -33,3 +34,27 @@ class ReceptionFlowTests(TestCase):
         self.assertEqual(complete.status_code, 200)
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("Priya", mail.outbox[0].body)
+
+
+class TenantRBACTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(email="owner-a@example.com", password="safe-test-password")
+        self.business_a = Business.objects.create(slug="business-a", name="Business A", description="A", status=Business.Status.ACTIVE)
+        self.business_b = Business.objects.create(slug="business-b", name="Business B", description="B", status=Business.Status.ACTIVE)
+        BusinessMembership.objects.create(
+            business=self.business_a, user=self.owner,
+            role=BusinessMembership.Role.OWNER, status=BusinessMembership.Status.ACTIVE,
+        )
+        CallSession.objects.create(business=self.business_a, caller_name="Allowed caller")
+        CallSession.objects.create(business=self.business_b, caller_name="Private caller")
+        self.client = APIClient()
+        self.client.force_login(self.owner)
+
+    def test_owner_can_read_own_dashboard(self):
+        response = self.client.get(f"/api/v1/businesses/{self.business_a.id}/dashboard/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["calls"]["total"], 1)
+
+    def test_owner_cannot_read_another_business(self):
+        response = self.client.get(f"/api/v1/businesses/{self.business_b.id}/dashboard/")
+        self.assertEqual(response.status_code, 404)

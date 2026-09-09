@@ -1,8 +1,14 @@
 from django.contrib.auth import authenticate, login, logout
+from django.conf import settings
+from datetime import timedelta
 from django.db.models import Count, Q
+from django.db import transaction
+from django.db.models.functions import TruncDate
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.decorators import method_decorator
+from django.utils import timezone
+from django.utils.text import slugify
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -11,7 +17,7 @@ from .models import Business, BusinessMembership, CallSession, Lead
 from .rbac import business_for_user
 from .serializers import (
     BusinessSerializer, CallDetailSerializer, CallSessionSerializer, LeadListSerializer,
-    LeadSerializer, MembershipSerializer, StartCallSerializer, TurnSerializer,
+    LeadSerializer, MembershipSerializer, SignupSerializer, StartCallSerializer, TurnSerializer,
 )
 from .services import Receptionist, complete_call, create_or_update_lead
 
@@ -27,12 +33,13 @@ class SessionInfo(APIView):
 
     def get(self, request):
         if not request.user.is_authenticated:
-            return Response({"authenticated": False})
+            return Response({"authenticated": False, "google_enabled": bool(getattr(settings, "SOCIALACCOUNT_PROVIDERS", {}).get("google"))})
         memberships = BusinessMembership.objects.filter(
             user=request.user, status=BusinessMembership.Status.ACTIVE
         ).select_related("business")
         return Response({
             "authenticated": True,
+            "google_enabled": bool(getattr(settings, "SOCIALACCOUNT_PROVIDERS", {}).get("google")),
             "user": {"id": str(request.user.id), "email": request.user.email, "name": request.user.get_full_name()},
             "memberships": MembershipSerializer(memberships, many=True).data,
         })
@@ -47,6 +54,37 @@ class SessionLogin(APIView):
             return Response({"detail": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST)
         login(request, user)
         return Response({"authenticated": True, "email": user.email})
+
+
+class SessionSignup(APIView):
+    permission_classes = [AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        serializer = SignupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        name_parts = data["name"].strip().split(maxsplit=1)
+        user = request._request.user.__class__.objects.create_user(
+            email=data["email"], password=data["password"],
+            first_name=name_parts[0], last_name=name_parts[1] if len(name_parts) > 1 else "",
+        )
+        base_slug = slugify(data["business_name"])[:42] or "business"
+        slug = base_slug
+        counter = 2
+        while Business.objects.filter(slug=slug).exists():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
+        business = Business.objects.create(
+            name=data["business_name"].strip(), slug=slug, description="",
+            email=data["email"], status=Business.Status.ONBOARDING,
+        )
+        BusinessMembership.objects.create(
+            business=business, user=user, role=BusinessMembership.Role.OWNER,
+            status=BusinessMembership.Status.ACTIVE, accepted_at=timezone.now(),
+        )
+        login(request, user)
+        return Response({"authenticated": True, "business_id": str(business.id)}, status=status.HTTP_201_CREATED)
 
 
 class SessionLogout(APIView):
@@ -75,10 +113,22 @@ class DashboardSummary(APIView):
             new=Count("id", filter=Q(status=Lead.Status.NEW)),
             converted=Count("id", filter=Q(status=Lead.Status.CONVERTED)),
         )
+        start_date = timezone.localdate() - timedelta(days=6)
+        activity_rows = (
+            calls.filter(started_at__date__gte=start_date)
+            .annotate(day=TruncDate("started_at"))
+            .values("day").annotate(count=Count("id")).order_by("day")
+        )
+        activity_by_day = {row["day"]: row["count"] for row in activity_rows}
+        activity = [
+            {"date": (start_date + timedelta(days=offset)).isoformat(), "count": activity_by_day.get(start_date + timedelta(days=offset), 0)}
+            for offset in range(7)
+        ]
         return Response({
             "business": BusinessSerializer(business).data,
             "calls": call_stats,
             "leads": lead_stats,
+            "activity": activity,
             "recent_calls": CallSessionSerializer(calls.order_by("-started_at")[:8], many=True).data,
         })
 

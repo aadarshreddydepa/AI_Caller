@@ -1,10 +1,32 @@
 from rest_framework import serializers
+from django.contrib.auth import password_validation
+from accounts.models import User
 from .models import Business, BusinessMembership, CallSession, ConversationTurn, Lead
 
 
 class StartCallSerializer(serializers.Serializer):
     business_slug = serializers.SlugField()
     caller_phone = serializers.CharField(required=False, allow_blank=True, max_length=32)
+
+
+class SignupSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=160)
+    business_name = serializers.CharField(max_length=160)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8, max_length=128)
+    password_confirm = serializers.CharField(write_only=True, max_length=128)
+
+    def validate_email(self, value):
+        normalized = value.strip().lower()
+        if User.objects.filter(email__iexact=normalized).exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return normalized
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
+        password_validation.validate_password(attrs["password"])
+        return attrs
 
 
 class TurnSerializer(serializers.Serializer):
@@ -24,7 +46,7 @@ class LeadSerializer(serializers.Serializer):
 class BusinessSerializer(serializers.ModelSerializer):
     class Meta:
         model = Business
-        fields = ["id", "slug", "name", "description", "phone", "service_area", "timezone", "default_language"]
+        fields = ["id", "slug", "name", "description", "phone", "service_area", "timezone", "default_language", "status"]
 
 
 class MembershipSerializer(serializers.ModelSerializer):
@@ -43,12 +65,15 @@ class ConversationTurnSerializer(serializers.ModelSerializer):
 
 class CallSessionSerializer(serializers.ModelSerializer):
     lead_id = serializers.UUIDField(source="lead.id", read_only=True, allow_null=True)
+    lead_requirement = serializers.CharField(source="lead.requirement", read_only=True, allow_null=True)
+    lead_status = serializers.CharField(source="lead.status", read_only=True, allow_null=True)
 
     class Meta:
         model = CallSession
         fields = [
             "id", "direction", "caller_name", "caller_phone", "status", "started_at",
             "ended_at", "duration_seconds", "after_hours", "escalated", "lead_id",
+            "lead_requirement", "lead_status",
         ]
 
 
