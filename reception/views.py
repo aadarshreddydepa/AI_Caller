@@ -56,6 +56,7 @@ class SessionLogin(APIView):
         if not user or not user.is_active:
             return Response({"detail": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST)
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        request.session.set_expiry(60 * 60 * 24 * 30 if request.data.get("remember_me") is True else 0)
         return Response({"authenticated": True, "email": user.email})
 
 
@@ -193,6 +194,38 @@ class BusinessNotifications(APIView):
         return Response({
             "endpoints": NotificationEndpointSerializer(business.notification_endpoints.order_by("channel", "label"), many=True).data,
             "deliveries": NotificationDeliverySerializer(business.notification_deliveries.select_related("endpoint").order_by("-queued_at")[:100], many=True).data,
+        })
+
+
+class BusinessSearch(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = business_for_user(request.user, business_id)
+        query = request.query_params.get("q", "").strip()
+        if len(query) < 2:
+            return Response({"query": query, "calls": [], "leads": [], "services": [], "faqs": []})
+        calls = business.calls.filter(
+            Q(caller_name__icontains=query) | Q(caller_phone__icontains=query) |
+            Q(lead__requirement__icontains=query)
+        ).select_related("lead").order_by("-started_at")[:6]
+        leads = business.leads.filter(
+            Q(caller_name__icontains=query) | Q(caller_phone__icontains=query) |
+            Q(requirement__icontains=query) | Q(summary__icontains=query)
+        ).select_related("call").order_by("-created_at")[:6]
+        services = business.services.filter(
+            Q(name__icontains=query) | Q(description__icontains=query), active=True
+        ).order_by("name")[:6]
+        faqs = business.faqs.filter(
+            Q(question__icontains=query) | Q(answer__icontains=query) |
+            Q(keywords__icontains=query), active=True
+        ).order_by("priority")[:6]
+        return Response({
+            "query": query,
+            "calls": CallSessionSerializer(calls, many=True).data,
+            "leads": LeadListSerializer(leads, many=True).data,
+            "services": ServiceSerializer(services, many=True).data,
+            "faqs": FAQSerializer(faqs, many=True).data,
         })
 
 

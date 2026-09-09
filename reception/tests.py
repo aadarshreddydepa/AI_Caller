@@ -59,6 +59,12 @@ class TenantRBACTests(TestCase):
         response = self.client.get(f"/api/v1/businesses/{self.business_b.id}/dashboard/")
         self.assertEqual(response.status_code, 404)
 
+    def test_search_is_scoped_to_the_authenticated_business(self):
+        own = self.client.get(f"/api/v1/businesses/{self.business_a.id}/search/?q=Allowed")
+        self.assertEqual(own.status_code, 200)
+        self.assertEqual(len(own.data["calls"]), 1)
+        self.assertNotContains(own, "Private caller")
+
 
 class SignupFlowTests(TestCase):
     def setUp(self):

@@ -14,3 +14,4 @@ export type Knowledge = { services:{ id:string; name:string; description:string;
 export type Notifications = { endpoints:{ id:string; channel:string; destination:string; label:string; enabled:boolean; verified_at:string|null }[]; deliveries:{ id:string; channel:string; destination:string; status:string; attempt_count:number; queued_at:string; sent_at:string|null }[] };
 export type BusinessSettings = Business & { legal_name:string; description:string; timezone:string; default_language:string; phone:string; email:string; website:string; service_area:string; escalation_instructions:string };
 export type Profile = { id:string; email:string; name:string; phone:string };
+export type SearchResults = { query:string; calls:Call[]; leads:Lead[]; services:Knowledge["services"]; faqs:Knowledge["faqs"] };

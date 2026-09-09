@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     BusinessAppointments, BusinessCallDetail, BusinessCalls, BusinessDetail, BusinessKnowledge,
-    BusinessLeads, BusinessNotifications, BusinessSettings, CallComplete, CallLead, CallStart,
+    BusinessLeads, BusinessNotifications, BusinessSearch, BusinessSettings, CallComplete, CallLead, CallStart,
     CallTurn, DashboardSummary, Profile, SessionInfo, SessionLogin, SessionLogout, SessionSignup,
 )
 
@@ -19,6 +19,7 @@ urlpatterns = [
     path("businesses/<uuid:business_id>/appointments/", BusinessAppointments.as_view()),
     path("businesses/<uuid:business_id>/knowledge/", BusinessKnowledge.as_view()),
     path("businesses/<uuid:business_id>/notifications/", BusinessNotifications.as_view()),
+    path("businesses/<uuid:business_id>/search/", BusinessSearch.as_view()),
     path("businesses/<uuid:business_id>/settings/", BusinessSettings.as_view()),
     path("calls/", CallStart.as_view()),
     path("calls/<uuid:call_id>/turns/", CallTurn.as_view()),
