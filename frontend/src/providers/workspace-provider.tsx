@@ -13,14 +13,14 @@ export function WorkspaceProvider({ children }:{ children:React.ReactNode }) {
   const [ready, setReady] = useState(false);
   async function refreshSession() {
     const next = await apiRequest<Session>("/backend/api/v1/auth/session/");
-    if (!next.authenticated || !next.memberships?.length) { router.replace("/login"); setReady(true); return; }
+    if (!next.authenticated || !next.memberships?.length) { router.replace("/auth/login"); setReady(true); return; }
     setSession(next); setReady(true);
   }
   useEffect(() => {
     let active = true;
     void apiRequest<Session>("/backend/api/v1/auth/session/").then((next) => {
       if (!active) return;
-      if (!next.authenticated || !next.memberships?.length) { router.replace("/login"); setReady(true); return; }
+      if (!next.authenticated || !next.memberships?.length) { router.replace("/auth/login"); setReady(true); return; }
       setSession(next); setReady(true);
     });
     return () => { active = false; };
