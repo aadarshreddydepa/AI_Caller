@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { apiRequest } from "@/lib/api";
+import { apiGet, apiRequest } from "@/lib/api";
 import type { Session } from "@/lib/types";
 
 export function AuthForm({ mode }:{ mode:"login"|"signup" }) {
@@ -11,7 +11,7 @@ export function AuthForm({ mode }:{ mode:"login"|"signup" }) {
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { apiRequest<Session>("/backend/api/v1/auth/session/").then(session => { setGoogleEnabled(session.google_enabled); if (session.authenticated) router.replace("/dashboard/overview"); }).catch(() => undefined); }, [router]);
+  useEffect(() => { apiGet<Session>("/backend/api/v1/auth/session/").then(session => { setGoogleEnabled(session.google_enabled); if (session.authenticated) router.replace("/dashboard/overview"); }).catch(() => undefined); }, [router]);
   async function submit(event:FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSubmitting(true);
     const form = new FormData(event.currentTarget); const password = String(form.get("password") || ""); const confirmation = String(form.get("password_confirm") || "");

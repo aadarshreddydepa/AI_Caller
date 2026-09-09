@@ -12,3 +12,15 @@ export async function apiRequest<T>(url:string, init:RequestInit = {}):Promise<T
   }
   return response.status === 204 ? undefined as T : response.json();
 }
+
+const inFlightGets = new Map<string, Promise<unknown>>();
+
+export function apiGet<T>(url:string):Promise<T> {
+  const existing = inFlightGets.get(url) as Promise<T>|undefined;
+  if (existing) return existing;
+  const request = apiRequest<T>(url, { method:"GET" }).finally(() => {
+    if (inFlightGets.get(url) === request) inFlightGets.delete(url);
+  });
+  inFlightGets.set(url, request);
+  return request;
+}
