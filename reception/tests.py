@@ -58,3 +58,37 @@ class TenantRBACTests(TestCase):
     def test_owner_cannot_read_another_business(self):
         response = self.client.get(f"/api/v1/businesses/{self.business_b.id}/dashboard/")
         self.assertEqual(response.status_code, 404)
+
+
+class SignupFlowTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_signup_creates_tenant_owner_and_authenticated_session(self):
+        response = self.client.post("/api/v1/auth/signup/", {
+            "name": "Ananya Rao", "business_name": "Ananya Dental Care",
+            "email": "ananya@example.com", "password": "Difficult-local-pass-42",
+            "password_confirm": "Difficult-local-pass-42",
+        }, format="json")
+        self.assertEqual(response.status_code, 201)
+        user = User.objects.get(email="ananya@example.com")
+        membership = BusinessMembership.objects.get(user=user)
+        self.assertEqual(membership.role, BusinessMembership.Role.OWNER)
+        self.assertEqual(membership.business.status, Business.Status.ACTIVE)
+        self.assertTrue(membership.business.notification_endpoints.filter(destination="ananya@example.com", enabled=True).exists())
+        self.assertTrue(self.client.get("/api/v1/auth/session/").data["authenticated"])
+
+    def test_signup_rejects_duplicate_email_and_mismatched_password(self):
+        User.objects.create_user(email="existing@example.com", password="Difficult-local-pass-42")
+        duplicate = self.client.post("/api/v1/auth/signup/", {
+            "name": "Existing User", "business_name": "Existing Business",
+            "email": "EXISTING@example.com", "password": "Difficult-local-pass-42",
+            "password_confirm": "Difficult-local-pass-42",
+        }, format="json")
+        mismatch = self.client.post("/api/v1/auth/signup/", {
+            "name": "New User", "business_name": "New Business",
+            "email": "new@example.com", "password": "Difficult-local-pass-42",
+            "password_confirm": "Different-local-pass-42",
+        }, format="json")
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(mismatch.status_code, 400)

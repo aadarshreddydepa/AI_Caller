@@ -9,15 +9,18 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.decorators import method_decorator
 from django.utils import timezone
 from django.utils.text import slugify
+from accounts.models import User
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Business, BusinessMembership, CallSession, Lead
+from .models import AppointmentRequest, Business, BusinessMembership, CallSession, FAQ, Lead, NotificationDelivery, NotificationEndpoint, Service
 from .rbac import business_for_user
 from .serializers import (
-    BusinessSerializer, CallDetailSerializer, CallSessionSerializer, LeadListSerializer,
-    LeadSerializer, MembershipSerializer, SignupSerializer, StartCallSerializer, TurnSerializer,
+    AppointmentSerializer, BusinessSerializer, BusinessSettingsSerializer, CallDetailSerializer,
+    CallSessionSerializer, FAQSerializer, LeadListSerializer, LeadSerializer, MembershipSerializer,
+    NotificationDeliverySerializer, NotificationEndpointSerializer, ProfileSerializer,
+    ServiceSerializer, SignupSerializer, StartCallSerializer, TurnSerializer,
 )
 from .services import Receptionist, complete_call, create_or_update_lead
 
@@ -52,7 +55,7 @@ class SessionLogin(APIView):
         user = authenticate(request, email=request.data.get("email", ""), password=request.data.get("password", ""))
         if not user or not user.is_active:
             return Response({"detail": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST)
-        login(request, user)
+        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
         return Response({"authenticated": True, "email": user.email})
 
 
@@ -65,7 +68,7 @@ class SessionSignup(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         name_parts = data["name"].strip().split(maxsplit=1)
-        user = request._request.user.__class__.objects.create_user(
+        user = User.objects.create_user(
             email=data["email"], password=data["password"],
             first_name=name_parts[0], last_name=name_parts[1] if len(name_parts) > 1 else "",
         )
@@ -77,13 +80,17 @@ class SessionSignup(APIView):
             counter += 1
         business = Business.objects.create(
             name=data["business_name"].strip(), slug=slug, description="",
-            email=data["email"], status=Business.Status.ONBOARDING,
+            email=data["email"], status=Business.Status.ACTIVE,
         )
         BusinessMembership.objects.create(
             business=business, user=user, role=BusinessMembership.Role.OWNER,
             status=BusinessMembership.Status.ACTIVE, accepted_at=timezone.now(),
         )
-        login(request, user)
+        NotificationEndpoint.objects.create(
+            business=business, channel=NotificationEndpoint.Channel.EMAIL,
+            destination=data["email"], label="Owner email", enabled=True,
+        )
+        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
         return Response({"authenticated": True, "business_id": str(business.id)}, status=status.HTTP_201_CREATED)
 
 
@@ -156,6 +163,64 @@ class BusinessLeads(APIView):
     def get(self, request, business_id):
         business = business_for_user(request.user, business_id)
         return Response(LeadListSerializer(business.leads.select_related("call").order_by("-created_at")[:100], many=True).data)
+
+
+class BusinessAppointments(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = business_for_user(request.user, business_id)
+        rows = business.appointment_requests.select_related("lead", "service").order_by("-created_at")[:100]
+        return Response(AppointmentSerializer(rows, many=True).data)
+
+
+class BusinessKnowledge(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = business_for_user(request.user, business_id)
+        return Response({
+            "services": ServiceSerializer(business.services.order_by("name"), many=True).data,
+            "faqs": FAQSerializer(business.faqs.order_by("priority", "question"), many=True).data,
+        })
+
+
+class BusinessNotifications(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business = business_for_user(request.user, business_id)
+        return Response({
+            "endpoints": NotificationEndpointSerializer(business.notification_endpoints.order_by("channel", "label"), many=True).data,
+            "deliveries": NotificationDeliverySerializer(business.notification_deliveries.select_related("endpoint").order_by("-queued_at")[:100], many=True).data,
+        })
+
+
+class BusinessSettings(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        return Response(BusinessSettingsSerializer(business_for_user(request.user, business_id)).data)
+
+    def patch(self, request, business_id):
+        business = business_for_user(request.user, business_id, "manage_content")
+        serializer = BusinessSettingsSerializer(business, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class Profile(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(ProfileSerializer(request.user).data)
+
+    def patch(self, request):
+        serializer = ProfileSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class CallStart(APIView):
