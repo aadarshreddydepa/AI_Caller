@@ -1,54 +1,125 @@
-# AI Caller - Local Prototype
+# AI Caller — Local Voice Prototype
 
-Multi-tenant Django backend for a controlled AI business receptionist. Version 1 deliberately answers only owner-approved information, captures callback requests, and emails an owner summary.
+AI Caller is a multi-tenant business receptionist prototype. A business owner can configure approved services and FAQs, then test a browser-based voice conversation with a local AI agent. Calls, transcripts, leads, and owner callback requests are stored in PostgreSQL.
 
-## Architecture
+## Local architecture
 
-`SIP/PSTN adapter (later) -> audio/STT adapter (later) -> Django receptionist API -> Business/FAQ/tools -> notification adapter`
+```text
+Browser microphone
+  -> browser speech recognition
+  -> Next.js dashboard
+  -> Django API
+  -> PostgreSQL / Redis (Docker)
+  -> native Ollama (local conversation model)
+  -> browser speech synthesis
+```
 
-The Django API and data model are the product core. Voice, telephony, LLM, calendar, email, WhatsApp, and SMS are replaceable adapters around it.
+The browser handles microphone transcription and spoken playback. Ollama runs natively on macOS for low-latency Apple Silicon/Metal performance. Docker is used only for PostgreSQL and Redis in this local prototype.
 
-## Technology choices
+## Technology
 
-- Python 3.13 + Django 5.2: tenant, business data, workflows, admin, and API.
-- Django REST Framework: API used first by the local simulator, later by voice/telephony adapters.
-- PostgreSQL 16: primary database locally and in production.
-- Redis 8: Django cache and Celery broker/result backend.
-- Celery: retryable owner notifications and future call-processing jobs.
-- Django console-email backend: local owner-notification proof; transactional email/SMS/WhatsApp adapter replaces it in production.
-- Deterministic retrieval: approved FAQs and services only. Local LLM/Ollama is an optional later phrasing adapter, never the source of business truth.
-- Asterisk + PJSIP + ARI/WebSocket media: local SIP and later public telephony adapter.
-- faster-whisper + Piper: later local STT/TTS adapters.
+- Next.js 16 + React 19: dashboard, authentication screens, voice-test interface.
+- Python 3.13 + Django 5.2 + Django REST Framework: API, business data, RBAC, and call workflow.
+- PostgreSQL 16 (Docker): persistent application data.
+- Redis 8 (Docker): cache and future background-job broker.
+- Ollama + `llama3.2:3b` (native): local conversational model; no cloud AI key is required.
+- Browser `SpeechRecognition` / `webkitSpeechRecognition`: speech-to-text; use Chrome or Brave and allow microphone access.
+- Browser Speech Synthesis API: text-to-speech.
 
-## Run it
+## One-time setup
+
+1. Create the application environment file:
 
 ```bash
 cp .env.example .env
+```
+
+2. Start the data services:
+
+```bash
 docker compose up -d
-python3 manage.py migrate
-python3 manage.py seed_demo
-python3 manage.py runserver
 ```
 
-In a second terminal, run the background worker:
+PostgreSQL is exposed at `127.0.0.1:5433`, and Redis at `127.0.0.1:6380`.
+
+3. Install and start native Ollama, then download the local model:
 
 ```bash
-celery -A config worker --loglevel=info
+brew install ollama
+brew services start ollama
+ollama pull llama3.2:3b
 ```
 
-The Compose services are isolated from any native PostgreSQL or Redis installation:
-
-- PostgreSQL: `127.0.0.1:5433`
-- Redis: `127.0.0.1:6380`
-
-Start a local test call:
+4. Install frontend dependencies:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/calls/ -H 'Content-Type: application/json' -d '{"business_slug":"bright-repairs","caller_phone":"+919999999999"}'
+cd frontend
+npm install
+cd ..
 ```
 
-Use the returned `call_id` to send a turn, capture the lead, then complete the call. Completion prints the owner email summary in the server terminal.
+5. Create the database schema and demo workspace:
 
-## Deliberate prototype limits
+```bash
+python3.13 manage.py migrate
+python3.13 manage.py seed_demo
+```
 
-No public phone number, live voice, automatic calendar booking, owner authentication, payment handling, or production secrets are included yet. These are added behind adapters after the controlled call flow is verified.
+## Run the app
+
+Open two terminals from the repository root.
+
+Terminal 1 — Django API:
+
+```bash
+python3.13 manage.py runserver 127.0.0.1:8000
+```
+
+Terminal 2 — Next.js dashboard:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+Demo login:
+
+```text
+Email: owner@example.com
+Password: demo-owner-local
+```
+
+## Test a real voice conversation
+
+1. Sign in and open **Dashboard → Overview → Test your agent**.
+2. Click **Start voice test** and allow microphone permission.
+3. Wait for the greeting to finish speaking.
+4. Click **Speak**, say one complete question, then pause.
+5. The browser combines speech fragments into one caller turn, Django sends it to local Ollama, and the response is spoken back as one agent turn.
+6. Click **End test** to save the completed call and transcript.
+
+Use Chrome or Brave on desktop. The model service must be running; check it with:
+
+```bash
+ollama list
+```
+
+## Stop everything
+
+Stop the two development-server terminals with `Ctrl+C`, then run:
+
+```bash
+brew services stop ollama
+docker compose stop
+```
+
+These commands stop services without deleting PostgreSQL data, Redis data, or the downloaded Ollama model. Use `docker compose down` only when you want to remove the Docker containers; do not add `-v` unless you intentionally want to delete database volumes.
+
+## Current prototype boundaries
+
+- This is browser voice testing, not a public telephone number yet.
+- Real PSTN/SIP calling will later need a telephony provider or PBX media-stream adapter.
+- Appointment booking, calendar integrations, email/SMS/WhatsApp delivery, and production deployment remain future adapters.
+- The agent should use only owner-approved business information from services, FAQs, and settings.
