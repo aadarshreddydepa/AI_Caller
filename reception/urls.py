@@ -3,6 +3,7 @@ from .views import (
     BusinessAppointments, BusinessCallDetail, BusinessCalls, BusinessDetail, BusinessKnowledge,
     BusinessLeads, BusinessNotifications, BusinessSearch, BusinessSettings, CallComplete, CallLead, CallStart,
     CallTurn, DashboardSummary, Profile, SessionInfo, SessionLogin, SessionLogout, SessionSignup,
+    VoiceAgentStatus, VoiceCallComplete, VoiceCallStart, VoiceCallTurn,
 )
 
 urlpatterns = [
@@ -21,6 +22,10 @@ urlpatterns = [
     path("businesses/<uuid:business_id>/notifications/", BusinessNotifications.as_view()),
     path("businesses/<uuid:business_id>/search/", BusinessSearch.as_view()),
     path("businesses/<uuid:business_id>/settings/", BusinessSettings.as_view()),
+    path("businesses/<uuid:business_id>/voice/status/", VoiceAgentStatus.as_view()),
+    path("businesses/<uuid:business_id>/voice/calls/", VoiceCallStart.as_view()),
+    path("businesses/<uuid:business_id>/voice/calls/<uuid:call_id>/turns/", VoiceCallTurn.as_view()),
+    path("businesses/<uuid:business_id>/voice/calls/<uuid:call_id>/complete/", VoiceCallComplete.as_view()),
     path("calls/", CallStart.as_view()),
     path("calls/<uuid:call_id>/turns/", CallTurn.as_view()),
     path("calls/<uuid:call_id>/lead/", CallLead.as_view()),

@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import AppointmentRequest, Business, BusinessMembership, CallSession, FAQ, Lead, NotificationDelivery, NotificationEndpoint, Service
+from .models import AppointmentRequest, Business, BusinessMembership, CallSession, ConversationTurn, FAQ, Lead, NotificationDelivery, NotificationEndpoint, Service
 from .rbac import business_for_user
 from .serializers import (
     AppointmentSerializer, BusinessSerializer, BusinessSettingsSerializer, CallDetailSerializer,
@@ -23,6 +23,7 @@ from .serializers import (
     ServiceSerializer, SignupSerializer, StartCallSerializer, TurnSerializer,
 )
 from .services import Receptionist, complete_call, create_or_update_lead
+from .voice import VoiceAgent, ollama_status
 
 
 class BusinessDetail(APIView):
@@ -241,6 +242,47 @@ class BusinessSettings(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class VoiceAgentStatus(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, business_id):
+        business_for_user(request.user, business_id)
+        return Response(ollama_status())
+
+
+class VoiceCallStart(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, business_id):
+        business = business_for_user(request.user, business_id)
+        call = CallSession.objects.create(business=business, status=CallSession.Status.ACTIVE)
+        greeting = VoiceAgent().greeting(business)
+        VoiceAgent._create_turn(call, ConversationTurn.Speaker.AGENT, greeting)
+        return Response({"call_id": str(call.id), "reply": greeting}, status=status.HTTP_201_CREATED)
+
+
+class VoiceCallTurn(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, business_id, call_id):
+        serializer = TurnSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        business = business_for_user(request.user, business_id)
+        call = get_object_or_404(CallSession, id=call_id, business=business, status=CallSession.Status.ACTIVE)
+        answer = VoiceAgent().reply(call, serializer.validated_data["text"])
+        return Response({"reply": answer})
+
+
+class VoiceCallComplete(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, business_id, call_id):
+        business = business_for_user(request.user, business_id)
+        call = get_object_or_404(CallSession, id=call_id, business=business)
+        lead = complete_call(call)
+        return Response({"status": call.status, "lead_id": str(lead.id)})
 
 
 class Profile(APIView):
