@@ -10,10 +10,11 @@ import { useWorkspace } from "@/providers/workspace-provider";
 
 type VoiceStatus = { available:boolean; model:string };
 type TranscriptItem = { speaker:"agent"|"caller"; text:string };
+type RecognitionResult = ArrayLike<{ transcript:string }> & { isFinal?:boolean };
 type RecognitionInstance = {
   continuous:boolean; interimResults:boolean; lang:string;
   start:()=>void; stop:()=>void;
-  onresult:((event:{ results:ArrayLike<ArrayLike<{ transcript:string }>> })=>void)|null;
+  onresult:((event:{ results:ArrayLike<RecognitionResult>; resultIndex?:number })=>void)|null;
   onend:(()=>void)|null; onerror:((event:{ error:string })=>void)|null;
 };
 type RecognitionConstructor = new () => RecognitionInstance;
@@ -23,6 +24,8 @@ export function VoiceTestPage() {
   const { data:status, error, refresh } = useApi<VoiceStatus>(`/backend/api/v1/businesses/${businessId}/voice/status/`);
   const recognition = useRef<RecognitionInstance|null>(null);
   const callId = useRef<string|null>(null);
+  const capturedSpeech = useRef("");
+  const turnSubmitting = useRef(false);
   const [supported, setSupported] = useState<boolean|null>(null);
   const [hasActiveCall, setHasActiveCall] = useState(false);
   const [state, setState] = useState<"idle"|"starting"|"listening"|"thinking"|"speaking"|"ended">("idle");
@@ -40,7 +43,8 @@ export function VoiceTestPage() {
   }, []);
 
   const sendTurn = useCallback(async (text:string) => {
-    if (!callId.current) return;
+    if (!callId.current || turnSubmitting.current) return;
+    turnSubmitting.current = true;
     setState("thinking"); setMessage("");
     setTranscript(items => [...items, { speaker:"caller", text }]);
     try {
@@ -50,6 +54,8 @@ export function VoiceTestPage() {
     } catch (reason) {
       setState("idle");
       setMessage(reason instanceof Error ? reason.message : "The AI could not respond.");
+    } finally {
+      turnSubmitting.current = false;
     }
   }, [businessId, speak]);
 
@@ -59,16 +65,30 @@ export function VoiceTestPage() {
     queueMicrotask(() => setSupported(Boolean(Recognition && "speechSynthesis" in window)));
     if (!Recognition || !("speechSynthesis" in window)) return;
     const instance = new Recognition();
-    instance.continuous = false; instance.interimResults = false; instance.lang = "en-IN";
+    instance.continuous = false; instance.interimResults = true; instance.lang = "en-IN";
     instance.onresult = (event) => {
-      const text = event.results[event.results.length - 1][0].transcript.trim();
-      if (text) void sendTurn(text);
+      const parts:string[] = [];
+      for (let index = 0; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const text = result[0]?.transcript.trim();
+        if (text) parts.push(text);
+      }
+      capturedSpeech.current = parts.join(" ").trim();
     };
     instance.onerror = (event) => {
+      capturedSpeech.current = "";
       setState("idle");
       setMessage(event.error === "not-allowed" ? "Microphone permission was not granted." : "I could not understand that. Please try again.");
     };
-    instance.onend = () => setState(current => current === "listening" ? "idle" : current);
+    instance.onend = () => {
+      const text = capturedSpeech.current;
+      capturedSpeech.current = "";
+      if (text && callId.current && !turnSubmitting.current) {
+        void sendTurn(text);
+        return;
+      }
+      setState(current => current === "listening" ? "idle" : current);
+    };
     recognition.current = instance;
     return () => { instance.stop(); window.speechSynthesis.cancel(); };
   }, [sendTurn]);
@@ -89,10 +109,12 @@ export function VoiceTestPage() {
 
   function listen() {
     if (!callId.current || !recognition.current || state === "thinking" || state === "speaking") return;
+    capturedSpeech.current = "";
     setMessage(""); setState("listening"); recognition.current.start();
   }
 
   async function endTest() {
+    capturedSpeech.current = "";
     window.speechSynthesis.cancel(); recognition.current?.stop();
     if (callId.current) {
       try { await apiRequest(`/backend/api/v1/businesses/${businessId}/voice/calls/${callId.current}/complete/`, { method:"POST" }); } catch { /* transcript remains saved */ }
