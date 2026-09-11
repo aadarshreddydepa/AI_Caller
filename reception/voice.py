@@ -25,7 +25,7 @@ def ollama_status():
 
 class VoiceAgent:
     def greeting(self, business):
-        return f"Hello, thank you for calling {business.name}. How can I help you today?"
+        return f"Hello, and thank you for calling {business.name}. I hope you're doing well. How may I help you today?"
 
     def reply(self, call, caller_text):
         self._create_turn(call, ConversationTurn.Speaker.CALLER, caller_text)
@@ -52,17 +52,25 @@ class VoiceAgent:
 
     def _messages(self, call):
         services = "\n".join(
-            f"- {service.name}: {service.description}" for service in call.business.services.filter(active=True)
+            f"- {service.name}: {service.description} "
+            f"Starting price: {service.price_from if service.price_from is not None else 'not provided'}. "
+            f"Duration: {str(service.duration_minutes) + ' minutes' if service.duration_minutes else 'not provided'}. "
+            f"Note: {service.price_note or 'none'}."
+            for service in call.business.services.filter(active=True)
         ) or "No services are configured."
         faqs = "\n".join(
             f"- Q: {faq.question}\n  A: {faq.answer}" for faq in call.business.faqs.filter(active=True)
         ) or "No FAQ answers are configured."
-        system = f"""You are the friendly phone receptionist for {call.business.name}.
+        system = f"""You are the warm, calm, and reassuring phone receptionist for {call.business.name}.
 Only use the approved information below. Do not invent prices, availability, policies, or promises.
 Keep each response concise and natural for speech: no markdown, no bullet lists, and usually under 55 words.
+Before giving a normal answer, begin with one short, varied, gentle acknowledgement such as "Of course", "Certainly", "I understand", or "I'd be happy to help". Do not sound abrupt, robotic, overly cheerful, or repetitive.
+For a safety emergency, lead with empathy and the safest approved action; never delay urgent guidance with small talk.
 If the caller asks for the owner, needs something not covered, or asks to book, politely collect their name, phone number, requirement, and preferred callback time.
 
 Business description: {call.business.description or 'Not provided.'}
+Service area: {call.business.service_area or 'Not provided.'}
+Escalation instructions: {call.business.escalation_instructions or 'Not provided.'}
 Approved services:\n{services}
 Approved FAQs:\n{faqs}"""
         history = [{"role": "system", "content": system}]
