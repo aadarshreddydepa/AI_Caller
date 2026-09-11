@@ -19,6 +19,19 @@ type RecognitionInstance = {
 };
 type RecognitionConstructor = new () => RecognitionInstance;
 
+const FEMININE_VOICE_NAMES = [
+  "neerja", "veena", "samantha", "victoria", "karen", "moira", "fiona",
+  "zira", "aria", "jenny", "sonia", "susan", "female",
+];
+
+function preferredVoice(voices: SpeechSynthesisVoice[]) {
+  const english = voices.filter(voice => voice.lang.toLowerCase().startsWith("en"));
+  return english.find(voice => FEMININE_VOICE_NAMES.some(name => voice.name.toLowerCase().includes(name)))
+    ?? english.find(voice => voice.lang.toLowerCase() === "en-in")
+    ?? english[0]
+    ?? voices[0];
+}
+
 export function VoiceTestPage() {
   const { businessId } = useWorkspace();
   const { data:status, error, refresh } = useApi<VoiceStatus>(`/backend/api/v1/businesses/${businessId}/voice/status/`);
@@ -26,21 +39,53 @@ export function VoiceTestPage() {
   const callId = useRef<string|null>(null);
   const capturedSpeech = useRef("");
   const turnSubmitting = useRef(false);
+  const speechTimer = useRef<number|null>(null);
+  const audioContext = useRef<AudioContext|null>(null);
   const [supported, setSupported] = useState<boolean|null>(null);
   const [hasActiveCall, setHasActiveCall] = useState(false);
   const [state, setState] = useState<"idle"|"starting"|"listening"|"thinking"|"speaking"|"ended">("idle");
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [message, setMessage] = useState("");
 
+  const playSoftChime = useCallback(() => {
+    const AudioContextClass = window.AudioContext;
+    if (!AudioContextClass) return;
+    const context = audioContext.current ?? new AudioContextClass();
+    audioContext.current = context;
+    void context.resume();
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.055, context.currentTime + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.42);
+    gain.connect(context.destination);
+    [523.25, 659.25].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      oscillator.connect(gain);
+      oscillator.start(context.currentTime + index * 0.07);
+      oscillator.stop(context.currentTime + 0.44);
+    });
+  }, []);
+
   const speak = useCallback((text:string) => {
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1;
-    utterance.onstart = () => setState("speaking");
-    utterance.onend = () => setState("idle");
-    utterance.onerror = () => setState("idle");
-    window.speechSynthesis.speak(utterance);
-  }, []);
+    if (speechTimer.current !== null) window.clearTimeout(speechTimer.current);
+    setState("speaking");
+    playSoftChime();
+    speechTimer.current = window.setTimeout(() => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      const voice = preferredVoice(window.speechSynthesis.getVoices());
+      if (voice) utterance.voice = voice;
+      utterance.lang = voice?.lang ?? "en-IN";
+      utterance.rate = 0.94;
+      utterance.pitch = 1.04;
+      utterance.volume = 0.92;
+      utterance.onend = () => setState("idle");
+      utterance.onerror = () => setState("idle");
+      window.speechSynthesis.speak(utterance);
+    }, 520);
+  }, [playSoftChime]);
 
   const sendTurn = useCallback(async (text:string) => {
     if (!callId.current || turnSubmitting.current) return;
@@ -90,11 +135,22 @@ export function VoiceTestPage() {
       setState(current => current === "listening" ? "idle" : current);
     };
     recognition.current = instance;
-    return () => { instance.stop(); window.speechSynthesis.cancel(); };
+    return () => {
+      instance.stop();
+      window.speechSynthesis.cancel();
+      if (speechTimer.current !== null) window.clearTimeout(speechTimer.current);
+      void audioContext.current?.close();
+    };
   }, [sendTurn]);
 
   async function startTest() {
     if (!status?.available) return;
+    // Create/resume audio while handling the click so browsers permit the cue.
+    const AudioContextClass = window.AudioContext;
+    if (AudioContextClass) {
+      audioContext.current ??= new AudioContextClass();
+      await audioContext.current.resume();
+    }
     setState("starting"); setMessage(""); setTranscript([]);
     try {
       const response = await apiRequest<{ call_id:string; reply:string }>(`/backend/api/v1/businesses/${businessId}/voice/calls/`, { method:"POST" });
@@ -115,6 +171,7 @@ export function VoiceTestPage() {
 
   async function endTest() {
     capturedSpeech.current = "";
+    if (speechTimer.current !== null) window.clearTimeout(speechTimer.current);
     window.speechSynthesis.cancel(); recognition.current?.stop();
     if (callId.current) {
       try { await apiRequest(`/backend/api/v1/businesses/${businessId}/voice/calls/${callId.current}/complete/`, { method:"POST" }); } catch { /* transcript remains saved */ }
